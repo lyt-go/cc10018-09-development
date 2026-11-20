@@ -1,9 +1,14 @@
-"""数据预览业务规则：状态流转、字段校验与筛选口径都收在这里。"""
+"""数据预览业务规则：状态流转、字段校验与筛选口径都收在这里。
+
+取样能力（preview_samples）放在本服务内编排，但实际执行委托给
+engine/preview_sampler.py：先产出模板参数绑定结果，绑定通过才允许取样。
+"""
 from __future__ import annotations
 
 from typing import Any
 
 from app.store import store
+from app.engine.preview_sampler import PreviewSampler
 
 MODULE = "data_preview"
 LIST_FIELDS = ["模板编号", "数据源名", "预查询SQL", "返回列数", "采样行数", "缓存秒数", "刷新策略", "模板版本"]
@@ -14,6 +19,9 @@ NEGATIVE_ACTIONS = ["停用模板"]
 
 
 class DataPreviewService:
+    def __init__(self) -> None:
+        self.sampler = PreviewSampler()
+
     def list_entries(
         self,
         *,
@@ -49,6 +57,18 @@ class DataPreviewService:
         entry["abnormal"] = False
         rows.append(entry)
         return entry, []
+
+    def describe_sample_params(self, entry_id: int) -> dict[str, Any]:
+        """取样表单：返回关联SQL模板声明的参数与模板默认值。"""
+        return self.sampler.describe_params(entry_id)
+
+    def preview_samples(self, entry_id: int, values: dict[str, Any]) -> dict[str, Any]:
+        """基于模板参数绑定结果执行数据预览取样。
+
+        绑定失败时返回 status=binding_failed 并携带 field_errors，
+        调用方应在取样前提示问题字段；零行结果为 executed_zero_rows。
+        """
+        return self.sampler.sample(entry_id, values or {})
 
     def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
         entry = store.find(MODULE, entry_id)

@@ -112,26 +112,43 @@ class ChainOrchestrator:
         else:
             result["steps"].append({"step": 1, "module": "api_service", "status": "ok", "detail": f"接口 {api.get('接口编号')} 已发布"})
 
-        # Step 2: SQL模板绑定
+        # Step 2: SQL模板绑定（绑定结果是后续优化与预览取样的唯一可执行来源）
         bind_result = self.binder.expand_template(template_id, params)
         if not bind_result.get("ok"):
             result["ok"] = False
-            result["steps"].append({"step": 2, "module": "sql_template", "status": "error", "detail": "; ".join(bind_result.get("errors", []))})
+            result["steps"].append({
+                "step": 2, "module": "sql_template", "status": "error",
+                "detail": "; ".join(bind_result.get("errors", [])),
+                "binding_status": bind_result.get("status"),
+                "field_errors": bind_result.get("field_errors", {}),
+            })
+            # 绑定不可执行：直接终止，不进入查询优化，更不允许数据预览取样
+            result["binding"] = bind_result
             return result
         result["steps"].append({"step": 2, "module": "sql_template", "status": "ok", "detail": "SQL绑定成功", "bound_sql": bind_result["sql"]})
 
-        # Step 3: 查询优化
+        # Step 3: 查询优化（仅在绑定可执行后才允许介入）
         opt_report = self.optimizer.analyze_sql(bind_result["sql"], api_id=api_id)
         result["steps"].append({"step": 3, "module": "query_optimize", "status": "ok", "detail": f"预估成本 {opt_report.get('estimated_cost', 0)}", "suggestions": opt_report.get("index_suggestions", [])})
 
-        # Step 4: 数据预览
+        # Step 4: 数据预览——样本来源关联同一份模板参数绑定结果
         preview = next((r for r in store.rows("data_preview") if r.get("模板编号") == api.get("接口编号")), None)
         if preview:
-            result["steps"].append({"step": 4, "module": "data_preview", "status": "ok", "detail": f"预览模板 {preview.get('模板编号')} 已关联"})
+            result["steps"].append({
+                "step": 4, "module": "data_preview", "status": "ok",
+                "detail": f"预览模板 {preview.get('模板编号')} 已关联绑定结果",
+                "preview_id": preview.get("id"),
+                "binding_ref": {
+                    "status": bind_result.get("status"),
+                    "bindings": bind_result.get("bindings", []),
+                    "bound_sql": bind_result["sql"],
+                },
+            })
         else:
             result["steps"].append({"step": 4, "module": "data_preview", "status": "warning", "detail": "未找到关联的预览模板"})
 
         result["bound_sql"] = bind_result["sql"]
+        result["binding"] = bind_result
         result["optimization"] = opt_report
         return result
 

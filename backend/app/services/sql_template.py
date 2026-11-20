@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.store import store
+from app.engine.sql_binder import SqlTemplateBinder
 
 MODULE = "sql_template"
 LIST_FIELDS = ["模板编号", "模板名称", "SQL片段", "参数标记", "参数类型", "默认值", "使用次数", "模板版本"]
@@ -14,6 +15,37 @@ NEGATIVE_ACTIONS = []
 
 
 class SqlTemplateService:
+    def __init__(self) -> None:
+        self.binder = SqlTemplateBinder()
+
+    def describe_binding_params(self, entry_id: int) -> dict[str, Any]:
+        """返回模板声明的参数、类型与本模板默认值，供绑定表单渲染。"""
+        entry = store.find(MODULE, entry_id)
+        if entry is None:
+            return {"ok": False, "message": f"模板定义 {entry_id} 不存在或已归档"}
+        defaults = self.binder._template_defaults(entry)
+        params = []
+        for p in self.binder.parse_params(entry.get("SQL片段", "")):
+            name = p["name"]
+            params.append({
+                "name": name,
+                "type": p["type"],
+                "default": defaults.get(name, ""),
+                "has_default": name in defaults,
+            })
+        return {
+            "ok": True,
+            "template_id": entry_id,
+            "template_code": entry.get("模板编号", ""),
+            "sql_text": entry.get("SQL片段", ""),
+            "params": params,
+        }
+
+    def build_binding(self, entry_id: int, values: dict[str, Any]) -> dict[str, Any]:
+        """生成模板参数绑定结果（含空列表拦截、默认值回填、日期/整数校验）。"""
+        result = self.binder.bind_template(entry_id, values or {})
+        return result
+
     def list_entries(
         self,
         *,

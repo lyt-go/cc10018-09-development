@@ -65,6 +65,33 @@ def export_entries(
         headers={"Content-Disposition": 'attachment; filename="data_preview.csv"'})
 
 
+@router.get("/{entry_id}/sample-params", response_model=dict)
+def describe_sample_params(entry_id: int) -> dict:
+    """读取取样所需参数声明：关联SQL模板的参数、类型与模板默认值。"""
+    result = service.describe_sample_params(entry_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("message", "预览模板不存在"))
+    return result
+
+
+@router.post("/{entry_id}/samples", response_model=dict)
+def preview_samples(entry_id: int, payload: dict[str, object]) -> dict:
+    """执行数据预览取样。
+
+    入参 {"values": {...}}。先产出模板参数绑定结果，绑定失败
+    （缺参/空集合/类型不符）时返回 422 并指出字段，不执行查询；
+    绑定成功才取样，零行结果以 status=executed_zero_rows 正常返回。
+    """
+    values = payload.get("values", {})
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail="values 必须是参数名到参数值的对象")
+    result = service.preview_samples(entry_id, values)
+    if not result.get("ok"):
+        # 绑定校验失败属于入参不可执行（422），与查询零行（200）明确区分
+        raise HTTPException(status_code=422, detail=result)
+    return result
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条预览模板明细；不存在时给出可读的错误说明。"""

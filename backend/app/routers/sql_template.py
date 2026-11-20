@@ -65,6 +65,29 @@ def export_entries(
         headers={"Content-Disposition": 'attachment; filename="sql_template.csv"'})
 
 
+@router.get("/{entry_id}/binding-params", response_model=dict)
+def describe_binding_params(entry_id: int) -> dict:
+    """读取模板声明的参数、类型与本模板默认值，供绑定/预览表单渲染。"""
+    result = service.describe_binding_params(entry_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("message", "模板不存在"))
+    return result
+
+
+@router.post("/{entry_id}/binding", response_model=dict)
+def build_binding(entry_id: int, payload: dict[str, object]) -> dict:
+    """生成模板参数绑定结果。
+
+    入参 {"values": {...}}：未提供的参数只回填本模板默认值；
+    显式空列表会被判为 empty_collection，不会扩大为全表查询；
+    日期/整数非法时按字段返回 type_mismatch，绑定结果不可执行。
+    """
+    values = payload.get("values", {})
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=400, detail="values 必须是参数名到参数值的对象")
+    return service.build_binding(entry_id, values)
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条模板定义明细；不存在时给出可读的错误说明。"""
